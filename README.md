@@ -3,13 +3,13 @@
 A simple cache simulator written in Rust programming language.
 
 ## Steps to run
-**Run immediately:**
-trace 1:
+**Run immediately**:
++ trace 1:
 `make run config_path=./configs/test.json trace_path=./trace/trace1.txt`
-trace 2:
++ trace 2:
 `make run config_path=./configs/test.json trace_path=./trace/trace2.txt`
 
-**Detailed Steps:**
+**Detailed Steps**:
 1. Get Rust toolchain and make sure you could compile Rust codes with `cargo`.
 2. Clone the repository: `git clone https://github.com/xuehaonan27/cache-simulator.git`.
 3. Enter the repository: `cd cache-simulator`.
