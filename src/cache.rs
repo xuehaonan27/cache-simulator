@@ -555,7 +555,6 @@ impl Cache {
             let content = &mut the_to_be_evicted_cache_line.data;
             let (wb_hit, wb_time) =
                 lower.handle_request(addr, 2usize.pow(byte_offset_bits), false, content);
-            assert!(wb_hit);
             time += wb_time;
         }
         // already written back

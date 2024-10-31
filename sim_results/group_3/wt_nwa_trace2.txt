@@ -1,0 +1,54 @@
+----------Build Simulator----------
+----------Start Simulation----------
+---------- L1 Cache ----------
+Size = 32768
+Associativity = 8
+Number of set = 64
+Block size = 64
+Access count: 177618
+Miss count: 2556
+Miss rate: 0.014390433402020066
+Replace count: 302
+Fetch from lower storage count: 568
+Prefetch count: 0
+Total access time: 5134915 ns
+Total latency cycles: 10269830
+
+---------- L2 Cache ----------
+Size = 262144
+Associativity = 8
+Number of set = 512
+Block size = 64
+Access count: 65610
+Miss count: 59750
+Miss rate: 0.9106843468983387
+Replace count: 3
+Fetch from lower storage count: 64
+Prefetch count: 0
+Total access time: 5027170 ns
+Total latency cycles: 10054340
+
+---------- L3 Cache ----------
+Size = 8388608
+Associativity = 8
+Number of set = 16384
+Block size = 64
+Access count: 65106
+Miss count: 64715
+Miss rate: 0.9939944091174393
+Replace count: 0
+Fetch from lower storage count: 62
+Prefetch count: 0
+Total access time: 4560420 ns
+Total latency cycles: 9120840
+
+---------- Main Memory ----------
+Access count: 65104
+Miss count: 0
+Miss rate: 0
+Replace count: 0
+Fetch from lower storage count: 0
+Prefetch count: 0
+Total access time: 3255200 ns
+Total latency cycles: 6510400
+
