@@ -3,14 +3,21 @@
 A simple cache simulator written in Rust programming language.
 
 ## Steps to run
-0. Get Rust toolchain and make sure you could compile Rust codes with `cargo`.
-1. Clone the repository: `git clone https://github.com/xuehaonan27/cache-simulator.git`.
-2. Enter the repository: `cd cache-simulator`.
-3. Prepare a configuration file as described below.
-4. Prepare a trace file.
-5. Run test with `make run config_path=</path/to/your/config/file> trace_path=</path/to/your/trace/file>`.
-6. The results will be printed to stdout with pretty format (as least I think it's pretty).
-7. Add `> /path/to/your/save/file` to save the results to a file.
+**Run immediately:**
+trace 1:
+`make run config_path=./configs/test.json trace_path=./trace/trace1.txt`
+trace 2:
+`make run config_path=./configs/test.json trace_path=./trace/trace2.txt`
+
+**Detailed Steps:**
+1. Get Rust toolchain and make sure you could compile Rust codes with `cargo`.
+2. Clone the repository: `git clone https://github.com/xuehaonan27/cache-simulator.git`.
+3. Enter the repository: `cd cache-simulator`.
+4. Prepare a configuration file as described below.
+5. Prepare a trace file.
+6. Run test with `make run config_path=</path/to/your/config/file> trace_path=</path/to/your/trace/file>`.
+7. The results will be printed to stdout with pretty format (as least I think it's pretty).
+8. Add `> /path/to/your/save/file` to save the results to a file.
 
 ## Configuration file
 You can see example configuration files in `configs` directory, e.g. `test.json`.
