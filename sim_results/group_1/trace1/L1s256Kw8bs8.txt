@@ -1,0 +1,24 @@
+---------- L1 Cache ----------
+Size = 262144
+Associativity = 8
+Number of set = 4096
+Block size = 8
+Access count: 471061
+Miss count: 6978
+Miss rate: 0.014813368120052392
+Replace count: 0
+Fetch from lower storage count: 2246
+Prefetch count: 0
+Total access time: 10298030.5 ns
+Total latency cycles: 20596061
+
+---------- Main Memory ----------
+Access count: 199004
+Miss count: 0
+Miss rate: 0
+Replace count: 0
+Fetch from lower storage count: 0
+Prefetch count: 0
+Total access time: 9950200 ns
+Total latency cycles: 19900400
+
