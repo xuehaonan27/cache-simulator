@@ -1,0 +1,32 @@
+{
+    "CPU_GHZ": 2.0,
+    "using_latency_as_cycles": true,
+    "memory": {
+        "hit_latency": 100,
+        "bus_latency": 0
+    },
+    "caches": [
+        {
+            "layer": 1,
+            "hit_latency": 1,
+            "bus_latency": 0,
+            "write_hit_policy": "WriteThrough",
+            "write_miss_policy": "NonWriteAllocate",
+            "replacement_policy": "LRU",
+            "size": 65536,
+            "associativity": 4,
+            "block_size": 32
+        },
+        {
+            "layer": 2,
+            "hit_latency": 1,
+            "bus_latency": 0,
+            "write_hit_policy": "WriteThrough",
+            "write_miss_policy": "NonWriteAllocate",
+            "replacement_policy": "LRU",
+            "size": 524288,
+            "associativity": 4,
+            "block_size": 32
+        }
+    ]
+}

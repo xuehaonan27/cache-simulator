@@ -4,27 +4,27 @@ Associativity = 2
 Number of set = 512
 Block size = 64
 Access count: 471061
-Miss count: 5608
-Miss rate: 0.011905039899291175
-Replace count: 1912
-Fetch from lower storage count: 2284
+Miss count: 5610
+Miss rate: 0.011909285633920023
+Replace count: 1913
+Fetch from lower storage count: 2285
 Prefetch count: 0
-Total access time: 10196093.5 ns
-Total latency cycles: 20392187
+Total access time: 10196094.5 ns
+Total latency cycles: 20392189
 
 ---------- L2 Cache ----------
 Size = 524288
 Associativity = 2
 Number of set = 4096
 Block size = 64
-Access count: 199042
+Access count: 199043
 Miss count: 176356
-Miss rate: 0.8860240552245254
+Miss rate: 0.8860196038042031
 Replace count: 6
 Fetch from lower storage count: 110
 Prefetch count: 0
-Total access time: 9948421 ns
-Total latency cycles: 19896842
+Total access time: 9948421.5 ns
+Total latency cycles: 19896843
 
 ---------- Main Memory ----------
 Access count: 196868

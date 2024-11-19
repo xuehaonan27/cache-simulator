@@ -74,12 +74,16 @@ def parse_file_group2(file_path):
         content = file.read()
 
     # 使用正则表达式提取L1 Cache, L2 Cache, L3 Cache等的相关信息
+    # cache_info = re.findall(
+    #     r'---------- (L\d+ Cache) ----------.*?Associativity = (\d+).*?Block size = (\d+).*?Miss rate: ([\d.]+)', content, re.DOTALL)
+    
     cache_info = re.findall(
-        r'---------- (L\d+ Cache) ----------.*?Associativity = (\d+).*?Miss rate: ([\d.]+)', content, re.DOTALL)
-
+        r'---------- (L1 Cache) ----------.*?Associativity = (\d+).*?Block size = (\d+).*?Miss rate: ([\d.]+)', content, re.DOTALL)
+    
+    
     data = []
-    for cache, associativity, miss_rate in cache_info:
-        data.append((cache, int(associativity), float(miss_rate)))
+    for cache, associativity, block_size, miss_rate in cache_info:
+        data.append((int(associativity), block_size, float(miss_rate)))
 
     return data
 
@@ -92,22 +96,22 @@ def read_all_files_group2(directory):
             results = parse_file_group2(file_path)
             if results:
                 data.extend(results)
-    data.sort(key=lambda x: x[1])  # sort according to associativity
+    data.sort(key=lambda x: x[0])  # sort according to associativity
     return data
 
 
 def plot_miss_rate_group2(data, save_path):
 
-    df = pd.DataFrame(data, columns=['Cache', 'Associativity', 'Miss Rate'])
+    df = pd.DataFrame(data, columns=['Associativity', 'Block Size', 'Miss Rate'])
 
     # 按Cache分组，绘制Miss Rate随Associativity变化的折线图
-    for cache, group in df.groupby('Cache'):
+    for cache, group in df.groupby('Block Size'):
         plt.plot(group['Associativity'], group['Miss Rate'],
                  marker='o', label=cache)
 
     plt.xlabel('Associativity')
     plt.ylabel('Miss Rate')
-    plt.title('Miss Rate vs Associativity for Different Caches')
+    plt.title('L1 Miss Rate vs Associativity for Different Block Sizes')
     plt.legend()
     plt.grid(True)
     plt.savefig(save_path)
@@ -115,8 +119,10 @@ def plot_miss_rate_group2(data, save_path):
 
 
 def main():
+    # directory = 'sim_results/group_1/trace2/'
+    # save_path = 'figures/group_1/miss_rate_to_block_size_trace2.png'
     directory = 'sim_results/group_2/trace1/'
-    save_path = 'figures/group_2/miss_rate_to_associativity_trace1.png'
+    save_path = 'figures/group_2/L1_miss_rate_to_associativity_trace1.png'
 
     # data = read_all_files_group1(directory)
     # plot_miss_rate_group1(data, save_path)

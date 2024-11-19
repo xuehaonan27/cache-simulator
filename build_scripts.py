@@ -62,10 +62,10 @@ def generate_group_1():
         ]
     }
     CONFIGS_DIR_PREFIX = 'configs/group_1/'
-    for cache_size in [1, 2, 4, 8, 16, 32, 64, 128, 256]:
+    for cache_size in [16, 32, 64, 128]:
         cache_size *= 1024  # KiB
         config["caches"][0]["size"] = cache_size
-        for bs in [8, 16, 32, 64, 128]:
+        for bs in [16, 32, 64, 128]:
             config["caches"][0]["block_size"] = bs
             save_config(config, CONFIGS_DIR_PREFIX)
 
@@ -104,10 +104,13 @@ def generate_group_2():
         ]
     }
     CONFIGS_DIR_PREFIX = 'configs/group_2/'
-    for ascc in [1, 2, 4, 8, 16, 32, 64]:
-        config["caches"][0]["associativity"] = ascc
-        config["caches"][1]["associativity"] = ascc
-        save_config(config, CONFIGS_DIR_PREFIX)
+    for ascc in [1, 2, 4, 8, 16]:
+        for bs in [16, 32, 64, 128]:
+            config["caches"][0]["associativity"] = ascc
+            config["caches"][1]["associativity"] = ascc
+            config["caches"][0]["block_size"] = bs
+            config["caches"][1]["block_size"] = bs
+            save_config(config, CONFIGS_DIR_PREFIX)
 
 
 if __name__ == '__main__':
