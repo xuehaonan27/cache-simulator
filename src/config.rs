@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::cache::{ReplacementPolicy, WriteHitPolicy, WriteMissPolicy};
+use crate::cache::{BypassPolicy, PrefetchPolicy, ReplacementPolicy, WriteHitPolicy, WriteMissPolicy};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -44,4 +44,12 @@ pub struct CacheConfig {
     pub write_miss_policy: WriteMissPolicy,
     #[serde(rename = "replacement_policy")]
     pub replacement_policy: ReplacementPolicy,
+    #[serde(rename = "prefetch_policy")]
+    pub prefetch_policy: PrefetchPolicy,
+    #[serde(rename = "bypass_policy")]
+    pub bypass_policy: BypassPolicy,
+    #[serde(rename = "stream_prefetch_depth")]
+    pub stream_prefetch_depth: u64,
+    #[serde(rename = "stride_stream_count")]
+    pub stride_stream_count: usize,
 }

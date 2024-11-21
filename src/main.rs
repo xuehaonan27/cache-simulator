@@ -69,12 +69,16 @@ fn main() -> Result<()> {
             .write_hit_policy(cache_config.write_hit_policy)
             .write_miss_policy(cache_config.write_miss_policy)
             .replacement_policy(cache_config.replacement_policy)
+            .prefetch_policy(cache_config.prefetch_policy)
             .latency(StorageLatency {
                 hit_latency: cache_config.hit_latency,
                 bus_latency: cache_config.bus_latency,
             })
             .stats(StorageStats::default())
-            .layer(cache_config.layer);
+            .layer(cache_config.layer)
+            .stream_prefetch_depth(cache_config.stream_prefetch_depth)
+            .stride_stream_count(cache_config.stride_stream_count)
+            .bypass_policy(cache_config.bypass_policy);
 
         if let Some(size) = cache_config.size {
             cache = cache.size(size);

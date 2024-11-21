@@ -15,6 +15,13 @@ impl Iterator for Trace {
     type Item = TraceOp;
 
     fn next(&mut self) -> Option<Self::Item> {
+        fn input() {
+            use std::io::BufRead;
+            let mut buf = String::new();
+            let mut stdin = std::io::stdin().lock();
+            stdin.read_line(&mut buf).unwrap();
+        }
+        // input();
         let idx = self.idx;
         self.idx += 1;
         self.inner.get(idx).cloned()

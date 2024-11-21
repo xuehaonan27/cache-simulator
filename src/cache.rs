@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,30 @@ pub enum ReplacementPolicy {
     PseudoLRU,
     #[serde(rename = "Clock")]
     Clock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrefetchPolicy {
+    #[serde(rename = "None")]
+    None,
+    #[serde(rename = "NextLine")]
+    NextLine,
+    #[serde(rename = "StreamBuffer")]
+    StreamBuffer,
+    #[serde(rename = "StreamPrefetcher")]
+    StreamPrefetcher,
+    #[serde(rename = "StridePrefetcher")]
+    StridePrefetcher,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BypassPolicy {
+    #[serde(rename = "None")]
+    None,
+    #[serde(rename = "Always")]
+    Always,
+    #[serde(rename = "Dynamic")]
+    Dynamic,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +113,8 @@ pub struct Cache {
     write_hit_policy: WriteHitPolicy,
     write_miss_policy: WriteMissPolicy,
     replacement_policy: ReplacementPolicy,
+    prefetch_policy: PrefetchPolicy,
+    bypass_policy: BypassPolicy,
     lower: Box<dyn Storage>,
     latency: StorageLatency,
     stats: StorageStats,
@@ -100,6 +126,9 @@ pub struct Cache {
     set_index_bits: u32,
     set_index_mask: u64,
     tag_mask: u64,
+
+    stream_prefetcher: StreamPrefetcher,
+    stride_prefetcher: StridePrefetcher,
 
     inner: CacheInner,
 }
@@ -141,6 +170,24 @@ impl Storage for Cache {
         // all access should have this latency
         time += self.latency.hit_latency;
 
+        // bypass policy
+        match self.bypass_policy {
+            BypassPolicy::None => { /* Never bypass, do nothing */ }
+            BypassPolicy::Always => {
+                /* Always send the request to lower storage */
+                let res = self.lower.handle_request(addr, bytes, read, content);
+                return res;
+            }
+            BypassPolicy::Dynamic => {
+                if !self.bypass_decision() {
+                    /* do nothing */
+                } else {
+                    let res = self.lower.handle_request(addr, bytes, read, content);
+                    return res;
+                }
+            }
+        }
+
         // calculate
         let byte_offset = addr & self.byte_offset_mask;
         let set_index = addr & self.set_index_mask >> self.byte_offset_bits;
@@ -161,7 +208,7 @@ impl Storage for Cache {
 
                 let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
                 // fill the buffer
-                content[copy_range].copy_from_slice(&cache_line.data[0..bytes]);
+                // content[copy_range].copy_from_slice(&cache_line.data[0..bytes]);
                 (true, time)
             }
             (false, Some(cache_line)) => {
@@ -174,13 +221,13 @@ impl Storage for Cache {
                         // just write here and mark the cache line as dirty
                         cache_line.dirty = true;
                         let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                        cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
+                        // cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
                     }
                     WriteHitPolicy::WriteThrough => {
                         // write here and issue write request to lower
                         cache_line.dirty = true; // useless but set it anyway
                         let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                        cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
+                        // cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
 
                         let (wt_hit, wt_time) =
                             self.lower.handle_request(addr, bytes, false, content);
@@ -232,8 +279,8 @@ impl Storage for Cache {
                 empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
 
                 // fill content buffer
-                let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                content[0..bytes].copy_from_slice(&empty_cache_line.data[copy_range]);
+                // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                // content[0..bytes].copy_from_slice(&empty_cache_line.data[copy_range]);
 
                 (false, time)
             }
@@ -293,8 +340,8 @@ impl Storage for Cache {
                         empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
 
                         // make changes
-                        let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                        empty_cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
+                        // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                        // empty_cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
                     }
                 }
                 (false, time)
@@ -302,6 +349,10 @@ impl Storage for Cache {
         };
 
         self.stats.access_time += res.1;
+
+        // prefetch when cache miss
+        let _prefetch_time = self.prefetch(addr, res.0);
+
         res
     }
 }
@@ -315,10 +366,14 @@ pub struct CacheOptions {
     write_hit_policy: WriteHitPolicy,
     write_miss_policy: WriteMissPolicy,
     replacement_policy: ReplacementPolicy,
+    prefetch_policy: PrefetchPolicy,
+    bypass_policy: BypassPolicy,
     lower: Option<Box<dyn Storage>>,
     latency: StorageLatency,
     stats: StorageStats,
     layer: usize,
+    stream_prefetch_depth: u64,
+    stream_count: usize,
 }
 
 impl CacheOptions {
@@ -331,10 +386,14 @@ impl CacheOptions {
             write_hit_policy: WriteHitPolicy::None,
             write_miss_policy: WriteMissPolicy::None,
             replacement_policy: ReplacementPolicy::None,
+            prefetch_policy: PrefetchPolicy::None,
+            bypass_policy: BypassPolicy::None,
             lower: None,
             latency: StorageLatency::default(),
             stats: StorageStats::default(),
             layer: 0,
+            stream_prefetch_depth: 0,
+            stream_count: 0,
         }
     }
 
@@ -373,6 +432,11 @@ impl CacheOptions {
         self
     }
 
+    pub fn prefetch_policy(mut self, prefetch_policy: PrefetchPolicy) -> Self {
+        self.prefetch_policy = prefetch_policy;
+        self
+    }
+
     pub fn lower(mut self, lower: Box<dyn Storage>) -> Self {
         self.lower = Some(lower);
         self
@@ -390,6 +454,21 @@ impl CacheOptions {
 
     pub fn layer(mut self, layer: usize) -> Self {
         self.layer = layer;
+        self
+    }
+
+    pub fn stream_prefetch_depth(mut self, stream_prefetch_depth: u64) -> Self {
+        self.stream_prefetch_depth = stream_prefetch_depth;
+        self
+    }
+
+    pub fn stride_stream_count(mut self, stream_count: usize) -> Self {
+        self.stream_count = stream_count;
+        self
+    }
+
+    pub fn bypass_policy(mut self, policy: BypassPolicy) -> Self {
+        self.bypass_policy = policy;
         self
     }
 
@@ -442,10 +521,18 @@ impl CacheOptions {
             write_hit_policy: self.write_hit_policy,
             write_miss_policy: self.write_miss_policy,
             replacement_policy: self.replacement_policy,
+            prefetch_policy: self.prefetch_policy,
+            bypass_policy: self.bypass_policy,
             lower: self.lower.unwrap(), // unwrap safe: control flow
             latency: self.latency,
             stats: self.stats,
             layer: self.layer,
+
+            stream_prefetcher: StreamPrefetcher::new(self.stream_prefetch_depth),
+            stride_prefetcher: StridePrefetcher::new(
+                self.stream_count,
+                self.stream_prefetch_depth as usize,
+            ),
 
             byte_offset_bits,
             byte_offset_mask,
@@ -559,5 +646,286 @@ impl Cache {
         }
         // already written back
         (the_to_be_evicted_cache_line, time)
+    }
+
+    fn prefetch(&mut self, addr: u64, hit: bool) -> usize {
+        let mut time = 0;
+        if hit {
+            return time;
+        }
+
+        match self.prefetch_policy {
+            PrefetchPolicy::None => { /* Do Nothing */ }
+            PrefetchPolicy::NextLine => {
+                // prefetche once (the next line)
+                self.stats.prefetch_num += 1;
+
+                // always prefetch the next line
+                let addr_of_next_line = (addr + self.block_size as u64) & (!self.byte_offset_mask);
+                let pf_time = self.get_block(addr_of_next_line);
+                time += pf_time;
+            }
+            PrefetchPolicy::StreamBuffer => {
+                // Detect specific memory access pattern
+            }
+            PrefetchPolicy::StreamPrefetcher => {
+                self.stream_prefetcher.record_access(addr);
+                let prefetch_addrs = self.stream_prefetcher.get_prefetch_addrs();
+                // debug!("prefetch_addrs: {:?}", prefetch_addrs);
+                if !prefetch_addrs.is_empty() {
+                    debug!("Got prefetch addrs");
+                    for pf_addr in prefetch_addrs {
+                        let pf_time = self.get_block(pf_addr);
+                        time += pf_time;
+                    }
+                    self.stream_prefetcher.clear_up();
+                }
+            }
+            PrefetchPolicy::StridePrefetcher => {
+                self.stride_prefetcher.record_access(addr);
+                let prefetch_addrs = self.stride_prefetcher.prefetch();
+                for pf_addr in prefetch_addrs {
+                    let pf_time = self.get_block(pf_addr);
+                    time += pf_time;
+                }
+                self.stride_prefetcher.clear_up();
+            }
+        }
+
+        time
+    }
+
+    fn get_block(&mut self, addr: u64) -> usize {
+        let mut time = 0;
+        let set_index = addr & self.set_index_mask >> self.byte_offset_bits;
+        let tag = addr & self.tag_mask;
+        let mut buf = Vec::new();
+        buf.resize(self.block_size, 0u8);
+        let (pf_hit, pf_time) = self
+            .lower
+            .handle_request(addr, self.block_size, true, &mut buf);
+        time += pf_time;
+        let inner = &mut self.inner.0;
+        let cache_set = &mut inner[set_index as usize];
+        let cache_line = cache_set
+            .0
+            .iter_mut()
+            .find(|cache_line| cache_line.valid && cache_line.tag == tag);
+
+        let empty_cache_line = match cache_line {
+            Some(empty_cache_line) => empty_cache_line,
+            None => {
+                self.stats.replace_num += 1;
+                let (empty_cache_line, add_time) = Cache::cache_set_evict_one(
+                    cache_set,
+                    &mut self.lower,
+                    self.replacement_policy,
+                    self.write_hit_policy,
+                    self.byte_offset_bits,
+                );
+                time += add_time; // eviction time
+                empty_cache_line
+            }
+        };
+
+        empty_cache_line.valid = true; // Turn it to valid
+        empty_cache_line.dirty = false; // Make it not dirty
+        empty_cache_line.tag = tag; // New tag
+        empty_cache_line.timestamp = Instant::now();
+        let copy_range = 0..self.block_size;
+        empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
+        time
+    }
+
+    fn bypass_decision(&self) -> bool {
+        match self.bypass_policy {
+            BypassPolicy::None => false,
+            BypassPolicy::Always => true,
+            BypassPolicy::Dynamic => match self.prefetch_policy {
+                PrefetchPolicy::None | PrefetchPolicy::NextLine | PrefetchPolicy::StreamBuffer => {
+                    let miss_rate = self.stats.miss_num as f64 / self.stats.access_counter as f64;
+                    if miss_rate > 0.02 {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                PrefetchPolicy::StreamPrefetcher => self.stream_prefetcher.should_bypass(),
+                PrefetchPolicy::StridePrefetcher => self.stride_prefetcher.should_bypass(),
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+struct StreamPrefetcher {
+    access_history: Vec<u64>,
+    prefetch_queue: Vec<u64>,
+    stride_table: HashMap<u64, i64>,
+    prefetch_depth: u64,
+}
+impl StreamPrefetcher {
+    pub fn new(prefetch_depth: u64) -> Self {
+        Self {
+            access_history: Vec::new(),
+            prefetch_queue: Vec::new(),
+            stride_table: HashMap::new(),
+            prefetch_depth,
+        }
+    }
+
+    pub fn record_access(&mut self, addr: u64) {
+        let last_addr = if self.access_history.len() >= 1 {
+            self.access_history.last().cloned()
+        } else {
+            None
+        };
+        // debug!("last_addr = {last_addr:?}");
+
+        self.access_history.push(addr);
+        // debug!("{addr} pushed, len = {}", self.access_history.len());
+
+        if self.access_history.len() > 1 {
+            let stride = addr - last_addr.unwrap();
+            // debug!("Stride = {stride}");
+            self.stride_table.insert(addr, stride as i64);
+        }
+
+        if self.access_history.len() == 3 {
+            if self.detect_linear_pattern() {
+                self.add_prefetch_addr();
+            } else {
+                // clear up
+                let first_addr = self.access_history.remove(0);
+                self.prefetch_queue.clear();
+                self.stride_table.remove_entry(&first_addr);
+            }
+        }
+    }
+
+    pub fn should_bypass(&self) -> bool {
+        self.prefetch_queue.is_empty()
+    }
+
+    pub fn get_prefetch_addrs(&self) -> Vec<u64> {
+        self.prefetch_queue.clone()
+    }
+
+    pub fn clear_up(&mut self) {
+        self.access_history.clear();
+        self.prefetch_queue.clear();
+        self.stride_table.clear();
+    }
+
+    fn detect_linear_pattern(&self) -> bool {
+        let mut strides = self.stride_table.values();
+        let stride_0 = strides.nth(0).unwrap();
+        let b = strides.all(|x| x == stride_0);
+        b
+    }
+
+    fn add_prefetch_addr(&mut self) {
+        let current_addr = self.access_history.last().cloned().unwrap();
+        let stride = self.stride_table.get(&current_addr).cloned().unwrap();
+        for i in 1..self.prefetch_depth + 1 {
+            let prefetch_addr = (current_addr as i64 + i as i64 * stride) as u64;
+            self.prefetch_queue.push(prefetch_addr);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PrefetchStream {
+    last_address: Option<u64>,
+    stride: Option<i64>,
+    prefetch_depth: usize,
+}
+
+impl PrefetchStream {
+    fn new(prefetch_depth: usize) -> Self {
+        PrefetchStream {
+            last_address: None,
+            stride: None,
+            prefetch_depth,
+        }
+    }
+
+    fn record_access(&mut self, address: u64) {
+        if let Some(last_address) = self.last_address {
+            let stride = address as i64 - last_address as i64;
+            self.stride = Some(stride);
+        }
+        self.last_address = Some(address);
+    }
+
+    fn prefetch(&self) -> Vec<u64> {
+        if let (Some(last_address), Some(stride)) = (self.last_address, self.stride) {
+            (1..=self.prefetch_depth)
+                .map(|i| (last_address as i64 + stride * i as i64) as u64)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn clear_up(&mut self) {
+        self.last_address = None;
+        self.stride = None;
+    }
+}
+
+#[derive(Debug)]
+struct StridePrefetcher {
+    streams: Vec<PrefetchStream>,
+    stream_count: usize,
+    prefetch_depth: usize,
+    stream_map: HashMap<u64, usize>,
+}
+
+impl StridePrefetcher {
+    fn new(stream_count: usize, prefetch_depth: usize) -> Self {
+        let streams = (0..stream_count)
+            .map(|_| PrefetchStream::new(prefetch_depth))
+            .collect();
+        StridePrefetcher {
+            streams,
+            stream_count,
+            prefetch_depth,
+            stream_map: HashMap::new(),
+        }
+    }
+
+    pub fn clear_up(&mut self) {
+        self.streams.iter_mut().for_each(|x| x.clear_up());
+    }
+
+    fn record_access(&mut self, address: u64) {
+        if let Some(stream_index) = self.stream_map.get(&address) {
+            self.streams[*stream_index].record_access(address);
+        } else {
+            let stream_index = self.find_least_recently_used_stream();
+            self.stream_map.insert(address, stream_index);
+            self.streams[stream_index].record_access(address);
+        }
+    }
+
+    fn find_least_recently_used_stream(&self) -> usize {
+        for (i, stream) in self.streams.iter().enumerate() {
+            if stream.last_address.is_none() {
+                return i;
+            }
+        }
+        0
+    }
+
+    pub fn should_bypass(&self) -> bool {
+        self.streams.is_empty()
+    }
+
+    fn prefetch(&self) -> Vec<u64> {
+        self.streams
+            .iter()
+            .flat_map(|stream| stream.prefetch())
+            .collect()
     }
 }
