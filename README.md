@@ -2,6 +2,22 @@
 ## Introduction
 A simple cache simulator written in Rust programming language.
 
+## For Lab3-2
+Run 
+```
+# No optimization **01-mcf-gem5-xcg**
+make run config_path=./configs/group_4/before.json trace_path=./trace/trace3.txt
+
+# No optimization **02-stream-gem5-xaa**
+make run config_path=./configs/group_4/before.json trace_path=./trace/trace4.txt
+
+# Optimization **01-mcf-gem5-xcg**
+make run config_path=./configs/group_4/after.json trace_path=./trace/trace3.txt
+
+# Optimization **02-stream-gem5-xaa**
+make run config_path=./configs/group_4/after.json trace_path=./trace/trace4.txt
+```
+
 ## Steps to run
 **Run immediately**:
 + trace 1:
