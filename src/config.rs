@@ -50,4 +50,6 @@ pub struct CacheConfig {
     pub max_streams: usize,
     #[serde(rename = "stream_buffer_depth")]
     pub stream_buffer_depth: usize,
+    #[serde(rename = "bypass")]
+    pub bypass: bool,
 }

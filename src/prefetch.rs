@@ -30,8 +30,6 @@ impl PrefetchStream {
             .iter()
             .find(|&cache_line| cache_line.tag == tag && cache_line.set == set)
     }
-
-    pub fn store_prefetched(&mut self, addr: u64) {}
 }
 
 #[derive(Debug)]

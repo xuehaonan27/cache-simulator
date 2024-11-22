@@ -4,6 +4,7 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    bypass::Bypasser,
     prefetch::PrefetchStreamManager,
     storage::{Storage, StorageLatency, StorageStats},
     Result,
@@ -117,6 +118,7 @@ pub struct Cache {
 
     prefetch_manager: PrefetchStreamManager,
     prefetch: bool,
+    bypass: bool,
 }
 
 impl Storage for Cache {
@@ -188,7 +190,8 @@ impl Storage for Cache {
                     for i in 0..depth {
                         self.stats.prefetch_num += 1;
                         let prefetch_addr = addr as i64 + (i as i64) * (stride as i64);
-                        let prefetch_addr = prefetch_addr as u64 >> self.byte_offset_bits << self.byte_offset_bits;
+                        let prefetch_addr =
+                            prefetch_addr as u64 >> self.byte_offset_bits << self.byte_offset_bits;
                         let (hit, pf_time) = self.lower.handle_request(
                             prefetch_addr,
                             self.block_size,
@@ -240,8 +243,8 @@ impl Storage for Cache {
                     WriteHitPolicy::WriteThrough => {
                         // write here and issue write request to lower
                         cache_line.dirty = true; // useless but set it anyway
-                        // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                        // cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
+                                                 // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                                                 // cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
 
                         let (wt_hit, wt_time) =
                             self.lower.handle_request(addr, bytes, false, content);
@@ -361,6 +364,7 @@ pub struct CacheOptions {
     max_streams: usize,
     stream_buffer_depth: usize,
     prefetch: bool,
+    bypass: bool,
 }
 
 impl CacheOptions {
@@ -380,6 +384,7 @@ impl CacheOptions {
             max_streams: 8,
             stream_buffer_depth: 4,
             prefetch: false,
+            bypass: false,
         }
     }
 
@@ -453,6 +458,11 @@ impl CacheOptions {
         self
     }
 
+    pub fn bypass(mut self, bypass: bool) -> Self {
+        self.bypass = bypass;
+        self
+    }
+
     pub fn build(self) -> Result<Cache> {
         if self.write_miss_policy == WriteMissPolicy::None {
             return Err("Must specify write miss policy".into());
@@ -519,6 +529,7 @@ impl CacheOptions {
                 self.stream_buffer_depth,
             ),
             prefetch: self.prefetch,
+            bypass: self.bypass,
         };
         Ok(cache)
     }

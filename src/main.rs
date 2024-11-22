@@ -15,6 +15,7 @@ mod memory;
 mod prefetch;
 mod storage;
 mod trace;
+mod bypass;
 
 pub type BoxDynError = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, BoxDynError>;
@@ -78,6 +79,7 @@ fn main() -> Result<()> {
             .max_streams(cache_config.max_streams)
             .stream_buffer_depth(cache_config.stream_buffer_depth)
             .prefetch(cache_config.prefetch)
+            .bypass(cache_config.bypass)
             .layer(cache_config.layer);
 
         if let Some(size) = cache_config.size {
