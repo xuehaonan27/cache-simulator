@@ -49,6 +49,7 @@ struct CacheLine {
     data: Vec<u8>, // size determined by [`Cache::block_size`]
 
     timestamp: Instant, // for real LRU
+    used: bool,         // for Clock
 }
 impl CacheLine {
     pub fn new(block_size: usize) -> Self {
@@ -58,16 +59,24 @@ impl CacheLine {
             tag: 0,
             data: vec![0; block_size],
             timestamp: Instant::now(),
+            used: false,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-#[repr(transparent)]
-struct CacheSet(Vec<CacheLine>);
+struct CacheSet {
+    cache_lines: Vec<CacheLine>,
+    pseudo_lru_tree: Vec<bool>, // for pseudo LRU algorithm
+    clock_pointer: usize,       // for clock algorithm
+}
 impl CacheSet {
     pub fn new(ways: usize, block_size: usize) -> Self {
-        Self(vec![CacheLine::new(block_size); ways])
+        Self {
+            cache_lines: vec![CacheLine::new(block_size); ways],
+            pseudo_lru_tree: vec![false; ways - 1],
+            clock_pointer: 0,
+        }
     }
 }
 
@@ -150,7 +159,7 @@ impl Storage for Cache {
         let inner = &mut self.inner.0;
         let cache_set = &mut inner[set_index as usize];
         let cache_line = cache_set
-            .0
+            .cache_lines
             .iter_mut()
             .find(|cache_line| cache_line.valid && cache_line.tag == tag);
 
@@ -206,7 +215,7 @@ impl Storage for Cache {
                 time += rd_time;
                 time += rd_time;
 
-                let empty_cache_line = cache_set.0.iter_mut().find(|line| !line.valid);
+                let empty_cache_line = cache_set.cache_lines.iter_mut().find(|line| !line.valid);
                 let empty_cache_line = if let Some(empty_cache_line) = empty_cache_line {
                     // If an empty cache line is found
                     empty_cache_line
@@ -268,7 +277,8 @@ impl Storage for Cache {
                         // or, the control flow should fall into the third branch, where the cache line
                         // is found
 
-                        let empty_cache_line = cache_set.0.iter_mut().find(|line| !line.valid);
+                        let empty_cache_line =
+                            cache_set.cache_lines.iter_mut().find(|line| !line.valid);
                         let empty_cache_line = if let Some(empty_cache_line) = empty_cache_line {
                             empty_cache_line
                         } else {
@@ -532,18 +542,62 @@ impl Cache {
             ReplacementPolicy::LRU => {
                 let mut far_one = 0;
                 let mut far_one_time = Instant::now();
-                cache_set.0.iter().enumerate().for_each(|(idx, line)| {
-                    if line.timestamp < far_one_time {
-                        far_one = idx;
-                        far_one_time = line.timestamp;
-                    }
-                });
-                let the_to_be_evicted_cache_line = &mut cache_set.0[far_one];
+                cache_set
+                    .cache_lines
+                    .iter()
+                    .enumerate()
+                    .for_each(|(idx, line)| {
+                        if line.timestamp < far_one_time {
+                            far_one = idx;
+                            far_one_time = line.timestamp;
+                        }
+                    });
+                let the_to_be_evicted_cache_line = &mut cache_set.cache_lines[far_one];
 
                 (the_to_be_evicted_cache_line, far_one)
             }
-            ReplacementPolicy::PseudoLRU => unimplemented!("PseudoLRU"),
-            ReplacementPolicy::Clock => unimplemented!("Clock"),
+            ReplacementPolicy::PseudoLRU => {
+                let mut node_index = 0;
+                let num_lines = cache_set.cache_lines.len();
+                let num_nodes = num_lines - 1;
+
+                // Traverse the tree to find the leaf to evict
+                while node_index < num_nodes {
+                    let left_child = 2 * node_index + 1;
+                    let right_child = 2 * node_index + 2;
+
+                    if cache_set.pseudo_lru_tree[node_index] {
+                        node_index = left_child;
+                    } else {
+                        node_index = right_child;
+                    }
+                }
+
+                // Convert the leaf node index to the cache line index
+                let line_index = node_index - num_nodes;
+                let the_to_be_evicted_cache_line = &mut cache_set.cache_lines[line_index];
+
+                // Update the tree to reflect the eviction
+                let mut update_index = node_index;
+                while update_index > 0 {
+                    let parent_index = (update_index - 1) / 2;
+                    cache_set.pseudo_lru_tree[parent_index] = update_index % 2 == 0;
+                    update_index = parent_index;
+                }
+
+                (the_to_be_evicted_cache_line, line_index)
+            }
+            ReplacementPolicy::Clock => {
+                let mut idx = cache_set.clock_pointer;
+                while cache_set.cache_lines[idx].used {
+                    cache_set.cache_lines[idx].used = false;
+                    idx = (idx + 1) % cache_set.cache_lines.len();
+                }
+                cache_set.clock_pointer = (idx + 1) % cache_set.cache_lines.len();
+                let the_to_be_evicted_cache_line = &mut cache_set.cache_lines[idx];
+
+                (the_to_be_evicted_cache_line, idx)
+            }
         };
 
         // if write back and this cache line is dirty
