@@ -42,14 +42,14 @@ pub enum ReplacementPolicy {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-struct CacheLine {
-    valid: bool,
-    dirty: bool,
-    tag: u64,
-    data: Vec<u8>, // size determined by [`Cache::block_size`]
+pub struct CacheLine {
+    pub valid: bool,
+    pub dirty: bool,
+    pub tag: u64,
+    pub data: Vec<u8>, // size determined by [`Cache::block_size`]
 
-    timestamp: Instant, // for real LRU
-    used: bool,         // for Clock
+    pub timestamp: Instant, // for real LRU
+    pub used: bool,         // for Clock
 }
 impl CacheLine {
     pub fn new(block_size: usize) -> Self {
@@ -65,7 +65,7 @@ impl CacheLine {
 }
 
 #[derive(Debug, Clone)]
-struct CacheSet {
+pub struct CacheSet {
     cache_lines: Vec<CacheLine>,
     pseudo_lru_tree: Vec<bool>, // for pseudo LRU algorithm
     clock_pointer: usize,       // for clock algorithm
@@ -167,6 +167,7 @@ impl Storage for Cache {
             (true, Some(cache_line)) => {
                 // read cache hit
                 cache_line.timestamp = Instant::now();
+                cache_line.used = true;
 
                 let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
                 // fill the buffer
@@ -176,6 +177,7 @@ impl Storage for Cache {
             (false, Some(cache_line)) => {
                 // write cache hit
                 cache_line.timestamp = Instant::now();
+                cache_line.used = true;
 
                 match self.write_hit_policy {
                     WriteHitPolicy::None => panic!(),
@@ -203,40 +205,28 @@ impl Storage for Cache {
                 self.stats.miss_num += 1;
                 // fetch from lower layer
                 self.stats.fetch_num += 1;
-                // fetch a whole block
                 let mut buf = Vec::new();
                 buf.resize(self.block_size, 0u8);
-                let (rd_hit, rd_time) = self.lower.handle_request(
-                    (addr >> self.byte_offset_bits) << self.byte_offset_bits,
+
+                // get an empty cache line for the new block
+                let (empty_cache_line, get_time, evicted) = Cache::get_lower_block(
+                    cache_set,
+                    addr,
                     self.block_size,
-                    true,
+                    &mut self.lower,
+                    self.replacement_policy,
+                    self.write_hit_policy,
+                    self.byte_offset_bits,
                     &mut buf,
                 );
-                time += rd_time;
-                time += rd_time;
+                time += get_time;
+                self.stats.replace_num += if evicted { 1 } else { 0 };
 
-                let empty_cache_line = cache_set.cache_lines.iter_mut().find(|line| !line.valid);
-                let empty_cache_line = if let Some(empty_cache_line) = empty_cache_line {
-                    // If an empty cache line is found
-                    empty_cache_line
-                } else {
-                    // If there's not an empty cache line for us to put data in
-                    // we have to ecivt somebody
-                    self.stats.replace_num += 1;
-                    let (empty_cache_line, add_time) = Cache::cache_set_evict_one(
-                        cache_set,
-                        &mut self.lower,
-                        self.replacement_policy,
-                        self.write_hit_policy,
-                        self.byte_offset_bits,
-                    );
-                    time += add_time; // eviction time
-                    empty_cache_line
-                };
                 empty_cache_line.valid = true; // Turn it to valid
                 empty_cache_line.dirty = false; // Make it not dirty
                 empty_cache_line.tag = tag; // New tag
                 empty_cache_line.timestamp = Instant::now();
+                empty_cache_line.used = true;
                 let copy_range = 0..self.block_size;
                 empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
 
@@ -262,43 +252,30 @@ impl Storage for Cache {
                         // write allocation
                         // allocate cache line, fetch content from lower storage, make changes and write whole block back
                         // issue request to lower storage to read the content to empty cache line
-                        let mut buf = Vec::new();
+
                         self.stats.fetch_num += 1;
+                        let mut buf = Vec::new();
                         buf.resize(self.block_size, 0u8);
-                        let (rd_hit, rd_time) = self.lower.handle_request(
-                            (addr >> self.byte_offset_bits) << self.byte_offset_bits,
+
+                        // Get an empty cache line for the new block
+                        let (empty_cache_line, get_time, evicted) = Cache::get_lower_block(
+                            cache_set,
+                            addr,
                             self.block_size,
-                            true,
+                            &mut self.lower,
+                            self.replacement_policy,
+                            self.write_hit_policy,
+                            self.byte_offset_bits,
                             &mut buf,
                         );
-                        time += rd_time;
-
-                        // the read block is not same with the cache line we are going to evict.
-                        // or, the control flow should fall into the third branch, where the cache line
-                        // is found
-
-                        let empty_cache_line =
-                            cache_set.cache_lines.iter_mut().find(|line| !line.valid);
-                        let empty_cache_line = if let Some(empty_cache_line) = empty_cache_line {
-                            empty_cache_line
-                        } else {
-                            // evict a cache line
-                            self.stats.replace_num += 1;
-                            let (empty_cache_line, add_time) = Cache::cache_set_evict_one(
-                                cache_set,
-                                &mut self.lower,
-                                self.replacement_policy,
-                                self.write_hit_policy,
-                                self.byte_offset_bits,
-                            );
-                            time += add_time;
-                            empty_cache_line
-                        };
+                        time += get_time;
+                        self.stats.replace_num += if evicted { 1 } else { 0 };
 
                         empty_cache_line.valid = true;
                         empty_cache_line.dirty = true; // we would make changes ourselves
                         empty_cache_line.tag = tag;
                         empty_cache_line.timestamp = Instant::now();
+                        empty_cache_line.used = true;
                         let copy_range = 0..self.block_size;
                         empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
 
@@ -529,6 +506,54 @@ fn init_cache_config(
 }
 
 impl Cache {
+    pub fn get_lower_block<'a>(
+        cache_set: &'a mut CacheSet,
+        addr: u64,
+        block_size: usize,
+        lower: &'a mut Box<dyn Storage>,
+        replacement_policy: ReplacementPolicy,
+        write_hit_policy: WriteHitPolicy,
+        byte_offset_bits: u32,
+        buf: &mut [u8],
+    ) -> (&'a mut CacheLine, usize, bool) {
+        let mut time = 0;
+
+        let (rd_hit, rd_time) = lower.handle_request(
+            (addr >> byte_offset_bits) << byte_offset_bits,
+            block_size,
+            true,
+            buf,
+        );
+        time += rd_time;
+
+        let mut evicted = false;
+
+        let found = cache_set
+            .cache_lines
+            .iter_mut()
+            .find(|line| !line.valid)
+            .is_some();
+
+        let res: &mut CacheLine = if found {
+            let empty_cache_line = cache_set.cache_lines.iter_mut().find(|line| !line.valid);
+            empty_cache_line.unwrap()
+        } else {
+            // evict a cache line
+            evicted = true;
+            let (empty_cache_line, add_time) = Cache::cache_set_evict_one(
+                cache_set,
+                lower,
+                replacement_policy,
+                write_hit_policy,
+                byte_offset_bits,
+            );
+            time += add_time;
+            empty_cache_line
+        };
+
+        (res, time, evicted)
+    }
+
     fn cache_set_evict_one<'a>(
         cache_set: &'a mut CacheSet,
         lower: &'a mut Box<dyn Storage>,

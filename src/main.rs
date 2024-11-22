@@ -12,6 +12,7 @@ mod cache;
 mod config;
 mod logger;
 mod memory;
+mod prefetch;
 mod storage;
 mod trace;
 
