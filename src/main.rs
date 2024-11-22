@@ -75,6 +75,9 @@ fn main() -> Result<()> {
                 bus_latency: cache_config.bus_latency,
             })
             .stats(StorageStats::default())
+            .max_streams(cache_config.max_streams)
+            .stream_buffer_depth(cache_config.stream_buffer_depth)
+            .prefetch(cache_config.prefetch)
             .layer(cache_config.layer);
 
         if let Some(size) = cache_config.size {

@@ -15,7 +15,10 @@
             "block_size": 64,
             "write_hit_policy": "WriteBack",
             "write_miss_policy": "WriteAllocate",
-            "replacement_policy": "LRU"
+            "replacement_policy": "LRU",
+            "prefetch": false,
+            "max_streams": 8,
+            "stream_buffer_depth": 4
         },
         {
             "layer": 2,
@@ -26,7 +29,10 @@
             "block_size": 64,
             "write_hit_policy": "WriteBack",
             "write_miss_policy": "WriteAllocate",
-            "replacement_policy": "LRU"
+            "replacement_policy": "LRU",
+            "prefetch": false,
+            "max_streams": 8,
+            "stream_buffer_depth": 4
         }
     ]
 }

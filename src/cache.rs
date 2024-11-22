@@ -1,9 +1,10 @@
-use std::time::Instant;
+use std::{borrow::BorrowMut, time::Instant};
 
 use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    prefetch::PrefetchStreamManager,
     storage::{Storage, StorageLatency, StorageStats},
     Result,
 };
@@ -46,6 +47,7 @@ pub struct CacheLine {
     pub valid: bool,
     pub dirty: bool,
     pub tag: u64,
+    pub set: u64,
     pub data: Vec<u8>, // size determined by [`Cache::block_size`]
 
     pub timestamp: Instant, // for real LRU
@@ -57,6 +59,7 @@ impl CacheLine {
             valid: false,
             dirty: false,
             tag: 0,
+            set: 0,
             data: vec![0; block_size],
             timestamp: Instant::now(),
             used: false,
@@ -111,6 +114,9 @@ pub struct Cache {
     tag_mask: u64,
 
     inner: CacheInner,
+
+    prefetch_manager: PrefetchStreamManager,
+    prefetch: bool,
 }
 
 impl Storage for Cache {
@@ -143,6 +149,7 @@ impl Storage for Cache {
         read: bool,
         content: &mut [u8],
     ) -> (bool, usize) {
+        // debug!("CACHE L{} {addr:#x}", self.layer);
         let mut time = 0;
         self.stats.access_counter += 1;
         // bus latency
@@ -163,15 +170,58 @@ impl Storage for Cache {
             .iter_mut()
             .find(|cache_line| cache_line.valid && cache_line.tag == tag);
 
+        if self.prefetch {
+            // if cache miss, then check prefetch streams first
+            if cache_line.is_none() {
+                if let Some(prefetch_line) = self.prefetch_manager.check_hit(tag, set_index) {
+                    // prefetch stream hit
+                    // get all the cache lines in this stream into the cache
+                    self.stats.prefetch_hit += 1;
+                    return (true, time);
+                } else {
+                    // prefetch stream miss
+                    let stride = self.prefetch_manager.record_addr(addr);
+                    let depth = self.prefetch_manager.stream_buffer_depth;
+                    let stream = self
+                        .prefetch_manager
+                        .get_stream(stride, self.prefetch_manager.stream_buffer_depth);
+                    for i in 0..depth {
+                        self.stats.prefetch_num += 1;
+                        let prefetch_addr = addr as i64 + (i as i64) * (stride as i64);
+                        let prefetch_addr = prefetch_addr as u64 >> self.byte_offset_bits << self.byte_offset_bits;
+                        let (hit, pf_time) = self.lower.handle_request(
+                            prefetch_addr,
+                            self.block_size,
+                            true,
+                            content,
+                        );
+                        // pf_time ignored
+                        let mut cache_line = CacheLine::new(self.block_size);
+                        cache_line.tag = prefetch_addr & self.tag_mask;
+                        cache_line.set =
+                            prefetch_addr & self.set_index_mask >> self.byte_offset_bits;
+
+                        if stream.buffer.len() >= depth {
+                            stream.buffer.pop_front();
+                        }
+                        stream.buffer.push_back(cache_line);
+                    }
+                    // fall into below miss logics
+                }
+            } else {
+                // debug!("HIT");
+            }
+        }
+
         let res = match (read, cache_line) {
             (true, Some(cache_line)) => {
                 // read cache hit
                 cache_line.timestamp = Instant::now();
                 cache_line.used = true;
 
-                let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
                 // fill the buffer
-                content[copy_range].copy_from_slice(&cache_line.data[0..bytes]);
+                // content[copy_range].copy_from_slice(&cache_line.data[0..bytes]);
                 (true, time)
             }
             (false, Some(cache_line)) => {
@@ -184,14 +234,14 @@ impl Storage for Cache {
                     WriteHitPolicy::WriteBack => {
                         // just write here and mark the cache line as dirty
                         cache_line.dirty = true;
-                        let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                        cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
+                        // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                        // cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
                     }
                     WriteHitPolicy::WriteThrough => {
                         // write here and issue write request to lower
                         cache_line.dirty = true; // useless but set it anyway
-                        let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                        cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
+                        // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                        // cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
 
                         let (wt_hit, wt_time) =
                             self.lower.handle_request(addr, bytes, false, content);
@@ -225,14 +275,15 @@ impl Storage for Cache {
                 empty_cache_line.valid = true; // Turn it to valid
                 empty_cache_line.dirty = false; // Make it not dirty
                 empty_cache_line.tag = tag; // New tag
+                empty_cache_line.set = set_index;
                 empty_cache_line.timestamp = Instant::now();
                 empty_cache_line.used = true;
-                let copy_range = 0..self.block_size;
-                empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
+                // let copy_range = 0..self.block_size;
+                // empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
 
                 // fill content buffer
-                let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                content[0..bytes].copy_from_slice(&empty_cache_line.data[copy_range]);
+                // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                // content[0..bytes].copy_from_slice(&empty_cache_line.data[copy_range]);
 
                 (false, time)
             }
@@ -274,14 +325,15 @@ impl Storage for Cache {
                         empty_cache_line.valid = true;
                         empty_cache_line.dirty = true; // we would make changes ourselves
                         empty_cache_line.tag = tag;
+                        empty_cache_line.set = set_index;
                         empty_cache_line.timestamp = Instant::now();
                         empty_cache_line.used = true;
-                        let copy_range = 0..self.block_size;
-                        empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
+                        // let copy_range = 0..self.block_size;
+                        // empty_cache_line.data[copy_range.clone()].copy_from_slice(&buf[copy_range]);
 
-                        // make changes
-                        let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
-                        empty_cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
+                        // // make changes
+                        // let copy_range = byte_offset as usize..(byte_offset as usize + bytes);
+                        // empty_cache_line.data[copy_range].copy_from_slice(&content[0..bytes]);
                     }
                 }
                 (false, time)
@@ -306,6 +358,9 @@ pub struct CacheOptions {
     latency: StorageLatency,
     stats: StorageStats,
     layer: usize,
+    max_streams: usize,
+    stream_buffer_depth: usize,
+    prefetch: bool,
 }
 
 impl CacheOptions {
@@ -322,6 +377,9 @@ impl CacheOptions {
             latency: StorageLatency::default(),
             stats: StorageStats::default(),
             layer: 0,
+            max_streams: 8,
+            stream_buffer_depth: 4,
+            prefetch: false,
         }
     }
 
@@ -377,6 +435,21 @@ impl CacheOptions {
 
     pub fn layer(mut self, layer: usize) -> Self {
         self.layer = layer;
+        self
+    }
+
+    pub fn max_streams(mut self, max_streams: usize) -> Self {
+        self.max_streams = max_streams;
+        self
+    }
+
+    pub fn stream_buffer_depth(mut self, stream_buffer_depth: usize) -> Self {
+        self.stream_buffer_depth = stream_buffer_depth;
+        self
+    }
+
+    pub fn prefetch(mut self, prefetch: bool) -> Self {
+        self.prefetch = prefetch;
         self
     }
 
@@ -440,6 +513,12 @@ impl CacheOptions {
             set_index_mask,
             tag_mask,
             inner,
+
+            prefetch_manager: PrefetchStreamManager::new(
+                self.max_streams,
+                self.stream_buffer_depth,
+            ),
+            prefetch: self.prefetch,
         };
         Ok(cache)
     }

@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, io::BufRead, path::Path};
 
 pub struct Trace {
     inner: Vec<TraceOp>,
@@ -15,6 +15,7 @@ impl Iterator for Trace {
     type Item = TraceOp;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // input();
         let idx = self.idx;
         self.idx += 1;
         self.inner.get(idx).cloned()
@@ -52,4 +53,10 @@ impl Trace {
             .collect();
         Self { inner, idx: 0 }
     }
+}
+
+fn input() {
+    let mut buf = String::new();
+    let mut stdin = std::io::stdin().lock();
+    let _ = stdin.read_line(&mut buf);
 }

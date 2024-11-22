@@ -57,6 +57,7 @@ pub struct StorageStats {
     pub replace_num: usize,  // Evict old lines
     pub fetch_num: usize,    // Fetch lower layer
     pub prefetch_num: usize, // Prefetch
+    pub prefetch_hit: usize, // Prefetch hit
 }
 
 impl Default for StorageStats {
@@ -68,6 +69,7 @@ impl Default for StorageStats {
             replace_num: 0,
             fetch_num: 0,
             prefetch_num: 0,
+            prefetch_hit: 0,
         }
     }
 }
@@ -82,6 +84,7 @@ impl StorageStats {
         } else {
             self.access_time as f64
         };
+        let amat = total_time / self.access_counter as f64;
         let total_cycles = if using_latency_as_cycles {
             self.access_time as f64
         } else {
@@ -93,8 +96,10 @@ impl StorageStats {
         println!("Replace count: {}", self.replace_num);
         println!("Fetch from lower storage count: {}", self.fetch_num);
         println!("Prefetch count: {}", self.prefetch_num);
+        println!("Prefetch hit: {}", self.prefetch_hit);
         println!("Total access time: {} ns", total_time);
         println!("Total latency cycles: {}", total_cycles);
+        println!("AMAT: {}", amat);
         println!();
     }
 }

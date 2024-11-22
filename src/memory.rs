@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use log::debug;
+
 use crate::{
     storage::{Storage, StorageLatency, StorageStats},
     Result,
@@ -54,6 +56,7 @@ impl Storage for Memory {
         read: bool,
         content: &mut [u8],
     ) -> (bool, usize) {
+        // debug!("MEMORY {addr:#x}");
         self.stats.access_counter += 1;
         let time = self.latency.hit_latency + self.latency.bus_latency;
 
@@ -73,13 +76,13 @@ impl Storage for Memory {
             let access_upper_bound = (page_upper_bound.min(end_addr) - page_lower_bound) as usize;
 
             let slice_bytes = access_upper_bound - access_lower_bound;
-            if read {
-                content[idx..idx + slice_bytes]
-                    .copy_from_slice(&page.0[access_lower_bound..access_upper_bound]);
-            } else {
-                page.0[access_lower_bound..access_upper_bound]
-                    .copy_from_slice(&content[idx..idx + slice_bytes]);
-            }
+            // if read {
+            //     content[idx..idx + slice_bytes]
+            //         .copy_from_slice(&page.0[access_lower_bound..access_upper_bound]);
+            // } else {
+            //     page.0[access_lower_bound..access_upper_bound]
+            //         .copy_from_slice(&content[idx..idx + slice_bytes]);
+            // }
             idx += slice_bytes;
         }
 

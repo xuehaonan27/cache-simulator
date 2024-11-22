@@ -44,4 +44,10 @@ pub struct CacheConfig {
     pub write_miss_policy: WriteMissPolicy,
     #[serde(rename = "replacement_policy")]
     pub replacement_policy: ReplacementPolicy,
+    #[serde(rename = "prefetch")]
+    pub prefetch: bool,
+    #[serde(rename = "max_streams")]
+    pub max_streams: usize,
+    #[serde(rename = "stream_buffer_depth")]
+    pub stream_buffer_depth: usize,
 }
